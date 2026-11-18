@@ -1,0 +1,287 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Календарно-финансовый план</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  padding:20px;
+  font-family:Arial,sans-serif;
+  background:#eef2f7;
+  color:#202b3c;
+}
+.container{
+  max-width:900px;
+  margin:25px auto;
+  background:white;
+  padding:28px;
+  border-radius:16px;
+  box-shadow:0 5px 25px #00000012;
+}
+h1{color:#174b82;margin-top:0}
+.subtitle{color:#68778b;margin-bottom:25px}
+label{display:block;font-weight:bold;margin:15px 0 7px}
+input{
+  width:100%;
+  padding:12px;
+  border:1px solid #ccd5e0;
+  border-radius:8px;
+  font-size:16px;
+}
+button{
+  border:0;
+  border-radius:8px;
+  padding:12px 18px;
+  margin:12px 7px 5px 0;
+  background:#1769aa;
+  color:white;
+  font-size:15px;
+  cursor:pointer;
+}
+button:hover{background:#105487}
+.secondary{background:#64748b}
+.green{background:#16834a}
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:20px;
+}
+th,td{
+  padding:12px;
+  border:1px solid #dce3eb;
+  text-align:center;
+}
+th{background:#eaf2fa}
+.notice{
+  background:#eef6ff;
+  padding:14px;
+  border-radius:8px;
+  margin-top:20px;
+}
+.error{color:#c62828;font-weight:bold}
+.success{color:#16834a;font-weight:bold}
+.summary{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:12px;
+  margin-top:20px;
+}
+.card{
+  background:#f1f6fb;
+  border-radius:10px;
+  padding:16px;
+}
+.card strong{display:block;font-size:20px;margin-top:8px}
+@media(max-width:600px){
+  body{padding:8px}
+  .container{padding:17px}
+  table{font-size:13px}
+  th,td{padding:7px}
+}
+@media print{
+  body{background:white}
+  .container{box-shadow:none}
+  button{display:none}
+}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Календарно-финансовый план</h1>
+<p class="subtitle">Практическая работа №27 · Вариант 25</p>
+
+<label for="project">Название проекта</label>
+<input id="project" value="Календарно-финансовый план">
+
+<label for="budget">Общий бюджет проекта (руб.)</label>
+<input id="budget" type="number" min="1" value="1000000">
+
+<label for="months">Количество месяцев</label>
+<input id="months" type="number" min="2" max="24" value="4">
+
+<div id="shares">
+<label>Распределение бюджета по месяцам (%)</label>
+<div id="monthInputs"></div>
+</div>
+
+<button onclick="calculate()">Рассчитать план</button>
+<button class="secondary" onclick="resetForm()">Сбросить</button>
+<button class="green" onclick="exportCSV()">Экспорт CSV</button>
+<button class="secondary" onclick="window.print()">Печать</button>
+
+<div id="message" class="notice">
+Введите параметры и нажмите «Рассчитать план».
+</div>
+
+<div id="result"></div>
+
+<div class="notice">
+<strong>Формула расчёта:</strong><br>
+Сᵢ = С × Pᵢ / 100<br>
+где С — общий бюджет, Pᵢ — доля бюджета за месяц.
+</div>
+
+<label for="sheetUrl">Ссылка Google Apps Script (необязательно)</label>
+<input id="sheetUrl" type="url" placeholder="Вставьте ссылку Web App /exec">
+
+<button class="green" onclick="sendToSheets()">Отправить данные в Google Sheets</button>
+<div id="sheetMessage"></div>
+</div>
+
+<script>
+let lastCalculation = [];
+
+function createInputs(){
+  const count = Number(document.getElementById('months').value);
+  const area = document.getElementById('monthInputs');
+  area.innerHTML = '';
+
+  if(!Number.isInteger(count) || count < 2 || count > 24){
+    area.innerHTML = '<p class="error">Количество месяцев должно быть от 2 до 24.</p>';
+    return;
+  }
+
+  const defaults = [20,30,25,25];
+  for(let i=0;i<count;i++){
+    const value = defaults[i] ?? Number((100/count).toFixed(2));
+    area.innerHTML += `
+      <label for="share${i}">Месяц ${i+1} — доля (%)</label>
+      <input id="share${i}" type="number" min="0" max="100"
+      step="0.01" value="${value}">
+    `;
+  }
+}
+
+document.getElementById('months').addEventListener('change',createInputs);
+createInputs();
+
+function calculate(){
+  const budget = Number(document.getElementById('budget').value);
+  const months = Number(document.getElementById('months').value);
+  const project = document.getElementById('project').value.trim();
+  const message = document.getElementById('message');
+  const result = document.getElementById('result');
+
+  result.innerHTML = '';
+  lastCalculation = [];
+
+  if(!project){
+    message.innerHTML = '<span class="error">Введите название проекта.</span>';
+    return;
+  }
+  if(!Number.isFinite(budget) || budget <= 0){
+    message.innerHTML = '<span class="error">Бюджет должен быть больше нуля.</span>';
+    return;
+  }
+  if(!Number.isInteger(months) || months < 2 || months > 24){
+    message.innerHTML = '<span class="error">Укажите от 2 до 24 месяцев.</span>';
+    return;
+  }
+
+  let shares = [];
+  for(let i=0;i<months;i++){
+    const input = document.getElementById('share'+i);
+    const value = Number(input.value);
+    if(!Number.isFinite(value) || value < 0 || value > 100){
+      message.innerHTML = '<span class="error">Проверьте процентные значения: допустимо от 0 до 100.</span>';
+      return;
+    }
+    shares.push(value);
+  }
+
+  const totalShare = shares.reduce((a,b)=>a+b,0);
+  if(Math.abs(totalShare-100)>0.01){
+    message.innerHTML = '<span class="error">Сумма процентов должна составлять 100%. Сейчас: '+totalShare.toFixed(2)+'%.</span>';
+    return;
+  }
+
+  let html = '<h2>Результат расчёта</h2><table><thead><tr><th>Месяц</th><th>Доля, %</th><th>Расходы, руб.</th></tr></thead><tbody>';
+  let total = 0;
+
+  shares.forEach((share,i)=>{
+    const cost = budget*share/100;
+    total += cost;
+    lastCalculation.push({
+      project:project,
+      month:i+1,
+      share:share,
+      cost:Number(cost.toFixed(2)),
+      budget:budget
+    });
+    html += `<tr><td>${i+1}</td><td>${share.toFixed(2)}</td><td>${cost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>`;
+  });
+
+  html += `<tr><th>Итого</th><th>${totalShare.toFixed(2)}</th><th>${total.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})}</th></tr>`;
+  html += '</tbody></table>';
+
+  html += `<div class="summary">
+    <div class="card">Бюджет<strong>${budget.toLocaleString('ru-RU')} ₽</strong></div>
+    <div class="card">Период<strong>${months} мес.</strong></div>
+    <div class="card">Распределено<strong>${totalShare.toFixed(2)}%</strong></div>
+  </div>`;
+
+  result.innerHTML = html;
+  message.innerHTML = '<span class="success">Расчёт успешно выполнен. Проверка пройдена.</span>';
+}
+
+function resetForm(){
+  document.getElementById('budget').value=1000000;
+  document.getElementById('months').value=4;
+  document.getElementById('project').value='Календарно-финансовый план';
+  createInputs();
+  document.getElementById('result').innerHTML='';
+  document.getElementById('message').textContent='Введите параметры и нажмите «Рассчитать план».';
+  lastCalculation=[];
+}
+
+function exportCSV(){
+  if(!lastCalculation.length){
+    alert('Сначала выполните расчёт.');
+    return;
+  }
+  const rows=[
+    ['Проект','Месяц','Доля (%)','Расходы (руб.)','Бюджет (руб.)'],
+    ...lastCalculation.map(x=>[x.project,x.month,x.share,x.cost,x.budget])
+  ];
+  const csv='\uFEFF'+rows.map(row=>row.join(';')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='calendar_financial_plan.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function sendToSheets(){
+  const url=document.getElementById('sheetUrl').value.trim();
+  const status=document.getElementById('sheetMessage');
+
+  if(!lastCalculation.length){
+    status.innerHTML='<p class="error">Сначала выполните расчёт.</p>';
+    return;
+  }
+  if(!url){
+    status.innerHTML='<p class="error">Вставьте ссылку Google Apps Script.</p>';
+    return;
+  }
+
+  try{
+    await fetch(url,{
+      method:'POST',
+      mode:'no-cors',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(lastCalculation)
+    });
+    status.innerHTML='<p class="success">Запрос отправлен. Проверьте данные в Google Sheets.</p>';
+  }catch(error){
+    status.innerHTML='<p class="error">Не удалось отправить данные. Проверьте ссылку и подключение.</p>';
+  }
+}
+</script>
+</body>
+</html>
